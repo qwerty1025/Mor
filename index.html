@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>五寮尖羊奶 - 戰情配送系統 V6.0旗艦版</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Noto Sans TC', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            dark: '#1e293b',
+                            primary: '#10b981',
+                            accent: '#f59e0b'
+                        },
+                        flavor: {
+                            original: '#22c55e', // 明亮綠
+                            sweet: '#ef4444',    // 鮮紅
+                            choc: '#8d6e63',     // 質感咖
+                            straw: '#a855f7',    // 亮紫
+                            sugar: '#f97316'     // 鮮橘
+                        }
+                    },
+                    animation: {
+                        'breathe-blue': 'breatheBlue 2s infinite',
+                        'breathe-purple': 'breathePurple 2s infinite',
+                    },
+                    keyframes: {
+                        breatheBlue: {
+                            '0%, 100%': { boxShadow: '0 0 0 0px rgba(59, 130, 246, 0.2)', borderColor: '#3b82f6' },
+                            '50%': { boxShadow: '0 0 0 4px rgba(59, 130, 246, 0.3)', borderColor: '#60a5fa' },
+                        },
+                        breathePurple: {
+                            '0%, 100%': { boxShadow: '0 0 0 0px rgba(168, 85, 247, 0.2)', borderColor: '#a855f7' },
+                            '50%': { boxShadow: '0 0 0 4px rgba(168, 85, 247, 0.3)', borderColor: '#c084fc' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #f8fafc; -webkit-tap-highlight-color: transparent; }
+        [v-cloak] { display: none; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        /* 卡片基礎 */
+        .card-base {
+            aspect-ratio: 1 / 1;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* 狀態：已完成 (消消樂) */
+        .card-done { 
+            opacity: 0.15; 
+            transform: scale(0.85); 
+            filter: grayscale(100%);
+            background-color: #cbd5e1 !important;
+            border: 1px dashed #94a3b8 !important;
+            box-shadow: none !important;
+        }
+
+        /* 狀態：延後 (呼吸燈) */
+        .card-defer { 
+            background-color: #eff6ff;
+            border-width: 2px;
+            /* Animation defined in tailwind config */
+            animation: breatheBlue 2s infinite; 
+            z-index: 10;
+        }
+
+        /* 狀態：調貨 (呼吸燈 - 紫) */
+        .card-swap { 
+            background-color: #faf5ff;
+            border-width: 2px;
+            animation: breathePurple 2s infinite;
+            z-index: 10;
+        }
+
+        /* 狀態：停送 (反白/灰階) */
+        .card-leave { 
+            background-color: #e2e8f0; 
+            color: #94a3b8;
+            border: 1px solid #cbd5e1;
+            filter: grayscale(100%);
+            opacity: 0.6;
+        }
+        .card-leave * { color: #94a3b8 !important; }
+        .card-leave .flavor-badge { background-color: #cbd5e1 !important; color: #fff !important; }
+
+        /* 特效與動畫 */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+        
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.25s ease; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+        
+        .slide-up-enter-active, .slide-up-leave-active { transition: transform 0.3s ease, opacity 0.3s ease; }
+        .slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); opacity: 0; }
+    </style>
+</head>
+<body class="h-screen overflow-hidden text-slate-800 font-sans">
+
+<div id="app" v-cloak class="h-full flex flex-col relative bg-slate-50">
+
+    <header class="bg-white shadow-sm z-30 flex-none border-b border-slate-100">
+        <div class="px-4 py-3">
+            <div class="flex justify-between items-start mb-3">
+                <div class="flex items-center gap-3">
+                    <button @click="toggleSidebar" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-50 text-slate-600 active:scale-95 transition shadow-sm border border-slate-200">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <div>
+                        <h1 class="text-lg font-black text-slate-800 tracking-tight">
+                            {{ currentYMD }} <span class="text-slate-400 text-sm font-medium">{{ weekDays[currentDayIndex] }}</span>
+                        </h1>
+                        <div class="flex items-center gap-2 mt-0.5">
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                                <i class="fas fa-truck text-emerald-500 mr-1"></i>剩 {{ remainingInventory.total }} 瓶
+                            </span>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-500 border border-blue-100">
+                                <i class="fas fa-wine-bottle mr-1"></i>約 {{ estimatedVolume }} L
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="relative w-12 h-12 flex items-center justify-center">
+                    <svg class="w-full h-full transform -rotate-90">
+                        <circle cx="24" cy="24" r="20" stroke="#f1f5f9" stroke-width="4" fill="none"></circle>
+                        <circle cx="24" cy="24" r="20" stroke="#10b981" stroke-width="4" fill="none"
+                                :stroke-dasharray="125.6" :stroke-dashoffset="125.6 * (1 - progressPercent / 100)"
+                                class="transition-all duration-500 ease-out"></circle>
+                    </svg>
+                    <span class="absolute text-[10px] font-black text-slate-700">{{ progressPercent }}%</span>
+                </div>
+            </div>
+
+            <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                <div v-for="(count, key) in remainingInventory.flavors" :key="key" 
+                     v-show="count > 0"
+                     class="pl-2 pr-1 py-1 rounded-lg text-[10px] font-bold text-white whitespace-nowrap flex items-center gap-1.5 shadow-sm transition-all duration-300"
+                     :style="{ backgroundColor: getFlavorColor(key) }">
+                    <span>{{ getFlavorName(key) }}</span>
+                    <span class="bg-white/20 px-1.5 py-0.5 rounded text-white min-w-[1.2rem] text-center">{{ count }}</span>
+                </div>
+                <div v-if="remainingInventory.total === 0" class="flex-1 text-center py-1 bg-emerald-50 text-emerald-600 rounded-lg text-xs font-bold border border-emerald-100">
+                    <i class="fas fa-check-circle animate-bounce"></i> 今日配送任務完成
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 overflow-y-auto p-3 pb-28 bg-slate-50/50">
+        
+        <div v-if="isLoading" class="flex flex-col items-center justify-center h-64 gap-4">
+            <div class="w-12 h-12 border-4 border-emerald-200 border-t-emerald-500 rounded-full animate-spin"></div>
+            <span class="text-slate-400 text-xs font-mono tracking-widest">SYSTEM LOADING...</span>
+        </div>
+
+        <div v-else class="grid grid-cols-3 gap-3 content-start">
+            <div v-for="order in filteredOrders" :key="order.id"
+                 @click="quickDone(order)"
+                 class="card-base rounded-2xl p-2.5 shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] border border-white bg-white select-none active:scale-95 flex flex-col justify-between"
+                 :class="[
+                    order.status === 'done' ? 'card-done' : '',
+                    order.status === 'defer' ? 'card-defer' : '',
+                    order.status === 'swap' ? 'card-swap' : '',
+                    order.status === 'leave' ? 'card-leave' : ''
+                 ]">
+                
+                <button @click.stop="openExceptionModal(order)" 
+                        class="absolute top-2 left-2 z-20 w-6 h-6 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-400 text-[9px] font-mono flex items-center justify-center border border-slate-200 transition-colors">
+                    {{ order.id }}
+                </button>
+
+                <div class="text-[9px] font-bold text-slate-400 text-right truncate pl-6 tracking-wide">
+                    {{ order.district }}
+                </div>
+                
+                <div class="flex-1 flex flex-col justify-center items-center text-center px-1">
+                    <div class="text-[15px] font-black text-slate-800 leading-tight line-clamp-2">
+                        {{ order.name }}
+                    </div>
+                    <div v-if="order.isTemp" class="mt-0.5 text-[8px] bg-red-100 text-red-500 px-1 rounded font-bold">臨</div>
+                </div>
+
+                <div class="flex flex-wrap gap-1 justify-center content-end">
+                    <template v-for="(qty, key) in order.flavors" :key="key">
+                        <div v-if="qty > 0" 
+                             class="flavor-badge h-5 min-w-[20px] px-1 rounded-md flex items-center justify-center text-[11px] text-white font-bold shadow-sm"
+                             :style="{ backgroundColor: getFlavorColor(key) }">
+                            {{ qty }}
+                        </div>
+                    </template>
+                </div>
+
+                <div v-if="order.status === 'defer'" class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <span class="bg-blue-500/90 text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg backdrop-blur-sm">延後</span>
+                </div>
+                <div v-if="order.status === 'swap'" class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <span class="bg-purple-500/90 text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg backdrop-blur-sm">調貨</span>
+                </div>
+                <div v-if="order.status === 'leave'" class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                     <span class="border-2 border-slate-400 text-slate-400 text-[10px] font-bold px-2 py-1 rounded -rotate-12">暫停</span>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div class="fixed bottom-4 left-4 right-4 z-40">
+        <div class="glass-panel rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.1)] p-1.5 flex justify-between items-center border border-white/50">
+            
+            <div class="flex items-center pl-3 gap-2">
+                <div class="w-2 h-2 rounded-full" :class="firebaseConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'"></div>
+                <span class="text-[10px] font-bold text-slate-400">監控中</span>
+            </div>
+
+            <div class="flex gap-2">
+                <button v-if="stats.defer > 0" @click="filterView('defer')" 
+                        class="relative px-4 py-2 rounded-xl bg-blue-50 text-blue-600 font-bold text-xs flex items-center gap-2 border border-blue-100 transition active:scale-95"
+                        :class="viewFilter === 'defer' ? 'ring-2 ring-blue-500 ring-offset-2' : ''">
+                    <i class="fas fa-clock"></i>
+                    <span>{{ stats.defer }}</span>
+                    <span v-if="viewFilter === 'defer'" class="absolute -top-1 -right-1 flex h-3 w-3">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+                    </span>
+                </button>
+
+                <button v-if="stats.swap > 0" @click="filterView('swap')" 
+                        class="relative px-4 py-2 rounded-xl bg-purple-50 text-purple-600 font-bold text-xs flex items-center gap-2 border border-purple-100 transition active:scale-95"
+                        :class="viewFilter === 'swap' ? 'ring-2 ring-purple-500 ring-offset-2' : ''">
+                    <i class="fas fa-exchange-alt"></i>
+                    <span>{{ stats.swap }}</span>
+                </button>
+
+                <button v-if="viewFilter !== 'all'" @click="filterView('all')" class="w-9 h-9 rounded-xl bg-slate-800 text-white flex items-center justify-center shadow-md active:scale-95">
+                    <i class="fas fa-undo text-xs"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <transition name="fade">
+        <div v-if="exceptionModal.show" class="fixed inset-0 z-50 flex items-center justify-center p-6">
+            <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="closeExceptionModal"></div>
+            <div class="bg-white w-full max-w-xs rounded-3xl shadow-2xl relative p-5 flex flex-col gap-4 transform transition-all scale-100">
+                
+                <div class="text-center">
+                    <div class="inline-block px-2 py-0.5 bg-slate-100 text-slate-400 text-[10px] font-mono rounded mb-1">{{ exceptionModal.order.id }}</div>
+                    <h3 class="text-xl font-black text-slate-800">{{ exceptionModal.order.name }}</h3>
+                    <p class="text-xs text-slate-400 mt-1">請選擇異常處理方式</p>
+                </div>
+
+                <div class="grid grid-cols-3 gap-3">
+                    <button @click="setException('leave')" class="group flex flex-col items-center gap-2 p-3 rounded-2xl bg-slate-50 border border-slate-200 active:bg-slate-200 transition">
+                        <div class="w-10 h-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center group-active:scale-90 transition">
+                            <i class="fas fa-ban text-lg"></i>
+                        </div>
+                        <span class="text-[10px] font-bold text-slate-500">停送/請假</span>
+                    </button>
+                    
+                    <button @click="setException('defer')" class="group flex flex-col items-center gap-2 p-3 rounded-2xl bg-blue-50 border border-blue-100 active:bg-blue-100 transition">
+                        <div class="w-10 h-10 rounded-full bg-blue-200 text-blue-600 flex items-center justify-center group-active:scale-90 transition">
+                            <i class="fas fa-clock text-lg"></i>
+                        </div>
+                        <span class="text-[10px] font-bold text-blue-600">延後配送</span>
+                    </button>
+                    
+                    <button @click="setException('swap')" class="group flex flex-col items-center gap-2 p-3 rounded-2xl bg-purple-50 border border-purple-100 active:bg-purple-100 transition">
+                        <div class="w-10 h-10 rounded-full bg-purple-200 text-purple-600 flex items-center justify-center group-active:scale-90 transition">
+                            <i class="fas fa-exchange-alt text-lg"></i>
+                        </div>
+                        <span class="text-[10px] font-bold text-purple-600">調貨/換奶</span>
+                    </button>
+                </div>
+
+                <div class="border-t border-slate-100 pt-3 mt-1">
+                    <button @click="setException('pending')" class="w-full py-3 rounded-xl border-2 border-slate-100 text-slate-400 text-xs font-bold active:bg-slate-50 transition">
+                        重置為未配送狀態
+                    </button>
+                </div>
+            </div>
+        </div>
+    </transition>
+
+    <transition name="slide-up">
+        <div v-if="isSidebarOpen" class="fixed inset-0 z-50 flex flex-col">
+            <div class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" @click="toggleSidebar"></div>
+            
+            <div class="mt-auto bg-white rounded-t-3xl shadow-2xl relative w-full flex flex-col max-h-[85vh]">
+                <div class="w-12 h-1 bg-slate-200 rounded-full mx-auto mt-3 mb-2"></div>
+                
+                <div class="p-6 space-y-6 overflow-y-auto">
+                    <div>
+                        <h2 class="text-2xl font-black text-slate-800">戰情中心 <span class="text-emerald-500">V6.0</span></h2>
+                        <p class="text-xs text-slate-400 font-bold tracking-wide">GEMINI DIGITAL SOLUTIONS</p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <button @click="openTempOrder" class="col-span-2 py-4 bg-emerald-500 text-white rounded-2xl font-bold shadow-lg shadow-emerald-200 active:scale-[0.98] transition flex items-center justify-center gap-2">
+                            <i class="fas fa-plus-circle text-lg"></i> 臨時加單
+                        </button>
+                        
+                        <button @click="openHistoryViewer" class="py-4 bg-indigo-50 text-indigo-600 rounded-2xl font-bold border border-indigo-100 active:bg-indigo-100 transition flex flex-col items-center gap-1">
+                            <i class="fas fa-history text-xl"></i>
+                            <span class="text-xs">全域歷史紀錄</span>
+                        </button>
+
+                        <button @click="refreshDataFromSheet" class="py-4 bg-slate-50 text-slate-600 rounded-2xl font-bold border border-slate-100 active:bg-slate-100 transition flex flex-col items-center gap-1">
+                            <i class="fas fa-sync-alt text-xl" :class="{'fa-spin': isRefreshing}"></i>
+                            <span class="text-xs">同步 Sheet</span>
+                        </button>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">配送日期切換</h3>
+                        <div class="flex justify-between bg-slate-100 p-1 rounded-xl">
+                            <button v-for="(day, idx) in weekDays" :key="idx"
+                                @click="changeDay(idx)"
+                                :class="[currentDayIndex === idx ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600']"
+                                class="flex-1 py-2 rounded-lg text-sm font-bold transition-all duration-200">
+                                {{ day }}
+                            </button>
+                        </div>
+                    </div>
+
+                     <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-xs font-bold text-slate-500">今日總瓶數</span>
+                            <span class="text-lg font-black text-slate-800">{{ remainingInventory.total + doneCount }}</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs font-bold text-slate-500">預估使用量 (0.18L/瓶)</span>
+                            <span class="text-lg font-black text-blue-600">{{ ( (remainingInventory.total + doneCount) * 0.18 ).toFixed(2) }} L</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </transition>
+
+    <transition name="slide-up">
+        <div v-if="showHistoryModal" class="fixed inset-0 z-[60] flex flex-col bg-white">
+            <div class="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-white z-10 shadow-sm">
+                <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
+                    <i class="fas fa-history text-indigo-500"></i> 
+                    全域配送紀錄
+                </h3>
+                <button @click="showHistoryModal = false" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-0 bg-slate-50 relative">
+                <div v-if="!hasLoadedHistory" class="flex flex-col items-center justify-center h-full p-10 text-center gap-4">
+                    <div class="w-16 h-16 bg-indigo-100 text-indigo-500 rounded-full flex items-center justify-center text-2xl mb-2">
+                        <i class="fas fa-database"></i>
+                    </div>
+                    <p class="text-sm text-slate-500 font-medium">讀取所有歷史資料可能需要一點時間</p>
+                    <button @click="loadGlobalHistory" class="px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 active:scale-95 transition">
+                        <i class="fas fa-download mr-1"></i> 開始讀取雲端資料
+                    </button>
+                </div>
+
+                <div v-else class="p-4 space-y-6">
+                     <div class="flex justify-end">
+                        <button @click="copyAllHistory" class="px-3 py-1.5 bg-slate-800 text-white text-xs font-bold rounded-lg flex items-center gap-1">
+                            <span v-if="copyStatus === 'idle'"><i class="fas fa-copy"></i> 複製全部 CSV</span>
+                            <span v-else class="text-emerald-400"><i class="fas fa-check"></i> 已複製</span>
+                        </button>
+                    </div>
+
+                    <div v-for="(dayLogs, date) in groupedHistory" :key="date" class="relative">
+                        <div class="sticky top-0 bg-slate-50/95 backdrop-blur py-2 z-10 flex items-center gap-2 mb-2">
+                            <span class="bg-indigo-500 text-white text-[10px] font-bold px-2 py-0.5 rounded">{{ date }}</span>
+                            <div class="h-px bg-slate-200 flex-1"></div>
+                        </div>
+                        
+                        <div class="space-y-2">
+                            <div v-for="(log, idx) in dayLogs" :key="idx" class="bg-white p-3 rounded-xl shadow-sm border border-slate-100 flex items-center justify-between">
+                                <div class="flex flex-col">
+                                    <span class="text-[10px] text-slate-400 font-mono">{{ formatTime(log.timestamp) }}</span>
+                                    <span class="font-bold text-slate-800 text-sm">{{ log.customerName }}</span>
+                                </div>
+                                <div class="px-2 py-1 rounded text-xs font-bold"
+                                     :class="{
+                                         'bg-emerald-50 text-emerald-600': log.action === 'done',
+                                         'bg-blue-50 text-blue-600': log.action === 'defer',
+                                         'bg-purple-50 text-purple-600': log.action === 'swap',
+                                         'bg-slate-100 text-slate-500': log.action === 'leave' || log.action === 'pending'
+                                     }">
+                                    {{ getActionName(log.action) }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div v-if="Object.keys(groupedHistory).length === 0" class="text-center text-slate-400 py-10">
+                        無歷史紀錄
+                    </div>
+                </div>
+            </div>
+        </div>
+    </transition>
+
+    <transition name="fade">
+        <div v-if="showTempOrderModal" class="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <div class="absolute inset-0 bg-slate-900/80 backdrop-blur-md" @click="showTempOrderModal = false"></div>
+            <div class="bg-white w-full max-w-sm rounded-3xl shadow-2xl relative p-6">
+                <h3 class="font-black text-xl mb-5 text-slate-800 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-500 flex items-center justify-center text-sm"><i class="fas fa-plus"></i></span>
+                    臨時加單
+                </h3>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="text-xs font-bold text-slate-500 uppercase ml-1">區域</label>
+                        <input v-model="tempForm.district" type="text" class="w-full mt-1 p-3 border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold" placeholder="例如：三峽街上">
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-slate-500 uppercase ml-1">顧客姓名</label>
+                        <input v-model="tempForm.name" type="text" class="w-full mt-1 p-3 border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold" placeholder="顧客稱呼">
+                    </div>
+                    
+                    <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                        <label class="text-xs font-bold text-slate-500 block mb-2 text-center">口味數量</label>
+                        <div class="grid grid-cols-5 gap-2 text-center">
+                            <div v-for="(name, key) in flavorNames" :key="key">
+                                <label class="text-[10px] block mb-1 font-bold text-slate-600 truncate">{{ name }}</label>
+                                <input v-model.number="tempForm.flavors[key]" type="tel" class="w-full p-1.5 border border-slate-200 rounded-lg text-center font-bold text-slate-800 focus:ring-1 focus:ring-emerald-500" placeholder="0">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 flex gap-3">
+                    <button @click="showTempOrderModal = false" class="flex-1 py-3 bg-slate-100 text-slate-500 rounded-xl font-bold">取消</button>
+                    <button @click="submitTempOrder" class="flex-1 py-3 bg-emerald-500 text-white rounded-xl font-bold shadow-lg shadow-emerald-200 active:scale-95 transition">確認</button>
+                </div>
+            </div>
+        </div>
+    </transition>
+
+</div>
+<script>
+    const { createApp, ref, computed, watch, onMounted } = Vue;
+
+    // Firebase Config (Keep original)
+    const firebaseConfig = {
+        apiKey: "AIzaSyB6D9vh6J2mdnjz2VXEVe99oi7oLF-irFo",
+        authDomain: "crm-ts-1225-001.firebaseapp.com",
+        databaseURL: "https://crm-ts-1225-001-default-rtdb.firebaseio.com",
+        projectId: "crm-ts-1225-001",
+        storageBucket: "crm-ts-1225-001.firebasestorage.app",
+        messagingSenderId: "925760221722",
+        appId: "1:925760221722:web:1aeda0b82f1f16b8dcd7a3"
+    };
+
+    let db;
+    try {
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.database();
+    } catch (e) { console.error(e); }
+
+    const googleSheetUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQF9dZUNtfJjbPIf4_3wvrJoVIv7WxGrXKEit9V0ou25BA9L1lMCEjqykH41p3f2MZc2b02nMLJXnrw/pub?gid=216467280&single=true&output=csv';
+
+    createApp({
+        setup() {
+            // UI State
+            const isLoading = ref(true);
+            const isRefreshing = ref(false);
+            const firebaseConnected = ref(false);
+            const isSidebarOpen = ref(false);
+            const showTempOrderModal = ref(false);
+            const viewFilter = ref('all');
+            
+            // History State
+            const showHistoryModal = ref(false);
+            const hasLoadedHistory = ref(false);
+            const globalLogs = ref([]);
+            const copyStatus = ref('idle');
+
+            // Exception Modal
+            const exceptionModal = ref({ show: false, order: {} });
+
+            // Date & Data
+            const weekDays = ['一', '二', '三', '四', '五', '六', '日'];
+            const currentDayIndex = ref(0); 
+            const currentYMD = ref(''); 
+            const rawRouteData = ref([]); 
+            const tempOrders = ref([]); 
+            const statusMap = ref({}); 
+
+            // Temp Form
+            const tempForm = ref({ district: '', name: '', flavors: { original:0, sweet:0, choc:0, straw:0, sugar:0 } });
+
+            // Config
+            const flavorColors = {
+                original: '#22c55e', 
+                sweet: '#ef4444', 
+                choc: '#8d6e63', 
+                straw: '#a855f7', 
+                sugar: '#f97316'
+            };
+            const flavorNames = {
+                original: '原味', sweet: '微甜', choc: '巧克力', straw: '草莓', sugar: '麥芽'
+            };
+
+            // --- Logic ---
+
+            // Quick Done (消消樂)
+            const quickDone = (order) => {
+                const newStatus = order.status === 'done' ? 'pending' : 'done';
+                updateStatus(order, newStatus);
+            };
+
+            // Exception Flow
+            const openExceptionModal = (order) => { exceptionModal.value = { show: true, order: order }; };
+            const closeExceptionModal = () => { exceptionModal.value.show = false; };
+            const setException = (status) => {
+                updateStatus(exceptionModal.value.order, status);
+                closeExceptionModal();
+            };
+
+            const updateStatus = (order, status) => {
+                if (!db) return;
+                const dateKey = currentYMD.value;
+                const oid = order.id;
+                const timestamp = Date.now();
+
+                db.ref(`delivery_records/${dateKey}/orders/${oid}`).set({
+                    status: status,
+                    timestamp: timestamp
+                });
+
+                if (status !== 'pending') {
+                    db.ref(`delivery_records/${dateKey}/logs`).push({
+                        timestamp: timestamp,
+                        customerId: oid,
+                        customerName: order.name,
+                        action: status
+                    });
+                }
+            };
+
+            // Temp Order
+            const openTempOrder = () => {
+                tempForm.value = { district: '', name: '', flavors: { original:0, sweet:0, choc:0, straw:0, sugar:0 } };
+                showTempOrderModal.value = true;
+                isSidebarOpen.value = false;
+            };
+
+            const submitTempOrder = () => {
+                const id = `temp_${Date.now()}`;
+                const newOrder = {
+                    id: id,
+                    district: tempForm.value.district || '臨時區',
+                    name: tempForm.value.name || '臨時顧客',
+                    isTemp: true,
+                    flavors: { ...tempForm.value.flavors },
+                    weekly: Array(7).fill({ ...tempForm.value.flavors }) 
+                };
+                tempOrders.value.push(newOrder);
+                
+                if(db) {
+                    db.ref(`delivery_records/${currentYMD.value}/logs`).push({
+                        timestamp: Date.now(),
+                        customerId: id,
+                        customerName: newOrder.name,
+                        action: '新增臨時單'
+                    });
+                }
+                showTempOrderModal.value = false;
+            };
+
+            // History & Data Fetching
+            const loadGlobalHistory = () => {
+                if(!db) return;
+                // Fetch root delivery_records to get all dates
+                db.ref('delivery_records').once('value').then(snap => {
+                    const data = snap.val();
+                    if(!data) { globalLogs.value = []; return; }
+                    
+                    let allLogs = [];
+                    Object.keys(data).forEach(date => {
+                        if(data[date].logs) {
+                            const dailyLogs = Object.values(data[date].logs).map(l => ({
+                                ...l,
+                                date: date
+                            }));
+                            allLogs = allLogs.concat(dailyLogs);
+                        }
+                    });
+                    
+                    // Sort by timestamp desc
+                    globalLogs.value = allLogs.sort((a,b) => b.timestamp - a.timestamp);
+                    hasLoadedHistory.value = true;
+                });
+            };
+
+            const openHistoryViewer = () => {
+                showHistoryModal.value = true;
+                isSidebarOpen.value = false;
+                // Reset to allow reload if needed, or keep cache. 
+                // Currently keeps cache until page refresh.
+            };
+
+            const copyAllHistory = () => {
+                let csv = "日期,時間,姓名,動作\n";
+                const actionMap = { done:'送達', leave:'請假', defer:'延後', swap:'調貨', pending:'重置', '新增臨時單':'新增臨時單' };
+                globalLogs.value.forEach(l => {
+                    csv += `${l.date},${formatTime(l.timestamp)},${l.customerName},${actionMap[l.action] || l.action}\n`;
+                });
+                navigator.clipboard.writeText(csv).then(() => {
+                    copyStatus.value = 'copied';
+                    setTimeout(() => copyStatus.value = 'idle', 2000);
+                });
+            };
+
+            // Basic Setup
+            const initDate = () => {
+                const today = new Date();
+                const jsDay = today.getDay(); 
+                const targetIdx = jsDay === 0 ? 6 : jsDay - 1;
+                setDateByWeekIndex(targetIdx);
+            };
+
+            const setDateByWeekIndex = (idx) => {
+                const today = new Date();
+                const currentJsDay = today.getDay() === 0 ? 7 : today.getDay();
+                const targetJsDay = idx + 1;
+                const diff = targetJsDay - currentJsDay;
+                const targetDate = new Date(today);
+                targetDate.setDate(today.getDate() + diff);
+                
+                currentDayIndex.value = idx;
+                const y = targetDate.getFullYear();
+                const m = String(targetDate.getMonth() + 1).padStart(2, '0');
+                const d = String(targetDate.getDate()).padStart(2, '0');
+                currentYMD.value = `${y}-${m}-${d}`;
+            };
+
+            const parseCSV = (csvText) => {
+                const lines = csvText.trim().split('\n');
+                const result = [];
+                for (let i = 1; i < lines.length; i++) {
+                    const row = lines[i].split(',');
+                    if (row.length < 3) continue;
+                    const uniqueId = row[0].replace(/"/g,'').trim();
+                    if (!uniqueId) continue;
+                    const entry = {
+                        id: uniqueId, 
+                        district: row[1].replace(/"/g,'').trim(),
+                        name: row[2].replace(/"/g,'').trim(),
+                        weekly: [] 
+                    };
+                    for (let d = 0; d < 7; d++) {
+                        const s = 3 + (d * 5); 
+                        entry.weekly.push({
+                            original: parseNum(row[s]),
+                            sweet: parseNum(row[s+1]),
+                            choc: parseNum(row[s+2]),
+                            straw: parseNum(row[s+3]),
+                            sugar: parseNum(row[s+4]),
+                        });
+                    }
+                    result.push(entry);
+                }
+                rawRouteData.value = result;
+            };
+            const parseNum = (v) => v ? parseInt(v.toString().replace(/２/g,'2').trim()) || 0 : 0;
+
+            const fetchStatus = () => {
+                if (!db) return;
+                const dateKey = currentYMD.value;
+                db.ref(`delivery_records/${dateKey}/orders`).on('value', (snap) => statusMap.value = snap.val() || {});
+                firebaseConnected.value = true;
+            };
+
+            const fetchRouteData = (isManual = false) => {
+                if(!isManual) isLoading.value = true;
+                fetch(googleSheetUrl).then(r=>r.text()).then(t=>{
+                    parseCSV(t);
+                    isLoading.value = false;
+                    if(isManual) alert("Google Sheet 同步完成");
+                }).catch(e=>{console.error(e); isLoading.value=false;});
+            };
+
+            const refreshDataFromSheet = async () => {
+                isRefreshing.value = true;
+                isSidebarOpen.value = false;
+                await fetchRouteData(true);
+                isRefreshing.value = false;
+            };
+
+            // Computed
+            const allOrders = computed(() => {
+                const csvOrders = rawRouteData.value.map(item => {
+                    const flavors = item.weekly[currentDayIndex.value];
+                    if (!flavors) return null;
+                    const sum = Object.values(flavors).reduce((a,b)=>a+b,0);
+                    if(sum === 0) return null;
+                    return { ...item, flavors };
+                }).filter(x => x);
+
+                const temps = tempOrders.value.map(item => ({...item}));
+                
+                return [...csvOrders, ...temps].map(item => {
+                    const dbData = statusMap.value[item.id] || { status: 'pending' };
+                    return { ...item, status: dbData.status, timestamp: dbData.timestamp };
+                });
+            });
+
+            const filteredOrders = computed(() => {
+                let list = allOrders.value;
+                if (viewFilter.value === 'defer') list = list.filter(o => o.status === 'defer');
+                if (viewFilter.value === 'swap') list = list.filter(o => o.status === 'swap');
+                return list;
+            });
+
+            const doneCount = computed(() => allOrders.value.filter(o => o.status === 'done').length);
+
+            const progressPercent = computed(() => {
+                const total = allOrders.value.length;
+                if (total === 0) return 0;
+                return Math.round((doneCount.value / total) * 100);
+            });
+
+            const remainingInventory = computed(() => {
+                const totals = { original: 0, sweet: 0, choc: 0, straw: 0, sugar: 0 };
+                let grandTotal = 0;
+                allOrders.value.forEach(order => {
+                    if (order.status === 'done' || order.status === 'leave') return;
+                    for (const key in totals) {
+                        totals[key] += (order.flavors[key] || 0);
+                        grandTotal += (order.flavors[key] || 0);
+                    }
+                });
+                return { flavors: totals, total: grandTotal };
+            });
+
+            const estimatedVolume = computed(() => {
+                // 公式：當日剩餘總瓶數 * 0.18
+                return (remainingInventory.value.total * 0.18).toFixed(2);
+            });
+
+            const stats = computed(() => ({
+                defer: allOrders.value.filter(o => o.status === 'defer').length,
+                swap: allOrders.value.filter(o => o.status === 'swap').length
+            }));
+
+            const groupedHistory = computed(() => {
+                // Group globalLogs by date
+                const groups = {};
+                globalLogs.value.forEach(log => {
+                    if(!groups[log.date]) groups[log.date] = [];
+                    groups[log.date].push(log);
+                });
+                return groups;
+            });
+
+            // Utils
+            const toggleSidebar = () => isSidebarOpen.value = !isSidebarOpen.value;
+            const changeDay = (idx) => { setDateByWeekIndex(idx); isSidebarOpen.value = false; };
+            const formatTime = (ts) => { if(!ts) return ''; const d=new Date(ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+            const getFlavorColor = (k) => flavorColors[k];
+            const getFlavorName = (k) => flavorNames[k];
+            const filterView = (t) => viewFilter.value = t;
+            const getActionName = (a) => {
+                const map = { done:'送達', leave:'請假', defer:'延後', swap:'調貨', pending:'重置' };
+                return map[a] || a;
+            };
+
+            watch(currentYMD, () => { if(db){ db.ref(`delivery_records`).off(); fetchStatus(); } });
+            onMounted(() => { initDate(); fetchRouteData(); fetchStatus(); });
+
+            return {
+                isLoading, isRefreshing, firebaseConnected, isSidebarOpen, showTempOrderModal,
+                weekDays, currentDayIndex, currentYMD, filteredOrders, progressPercent, remainingInventory,
+                estimatedVolume, doneCount,
+                stats, viewFilter, exceptionModal, tempForm, flavorNames,
+                showHistoryModal, hasLoadedHistory, groupedHistory, copyStatus,
+                toggleSidebar, openExceptionModal, closeExceptionModal, setException,
+                openTempOrder, submitTempOrder, refreshDataFromSheet, changeDay, quickDone, filterView,
+                getFlavorColor, getFlavorName,
+                loadGlobalHistory, openHistoryViewer, copyAllHistory, formatTime, getActionName
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
